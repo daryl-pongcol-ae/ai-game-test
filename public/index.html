@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vim Snake</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: 'Courier New', monospace;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 10px;
+}
+h1 {
+  color: #58a6ff;
+  font-size: 2em;
+  margin: 10px 0 5px;
+  text-shadow: 0 0 10px rgba(88,166,255,0.4);
+}
+.subtitle {
+  color: #8b949e;
+  font-size: 0.9em;
+  margin-bottom: 10px;
+}
+canvas {
+  border: 2px solid #30363d;
+  border-radius: 6px;
+  background: #161b22;
+  display: block;
+}
+#game-wrap {
+  position: relative;
+  display: none;
+}
+#hud {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 640px;
+  padding: 8px 4px;
+  font-size: 1.1em;
+}
+#hud span { color: #58a6ff; }
+#hud .multiplier { color: #f0883e; }
+#name-screen, #gameover-screen {
+  text-align: center;
+  margin-top: 40px;
+}
+#name-screen input {
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  padding: 10px 16px;
+  font-size: 1.2em;
+  font-family: inherit;
+  border-radius: 6px;
+  outline: none;
+  width: 260px;
+  margin: 16px 0;
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+#name-screen input:focus { border-color: #58a6ff; }
+button {
+  background: #238636;
+  color: #fff;
+  border: none;
+  padding: 10px 28px;
+  font-size: 1.1em;
+  font-family: inherit;
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 8px 4px;
+}
+button:hover { background: #2ea043; }
+button:disabled { background: #21262d; color: #484f58; cursor: default; }
+#gameover-screen { display: none; }
+#gameover-screen h2 { color: #f85149; font-size: 1.8em; margin-bottom: 10px; }
+#gameover-screen .final-score { font-size: 2em; color: #58a6ff; margin: 10px 0; }
+#scores-section {
+  margin-top: 20px;
+  width: 100%;
+  max-width: 640px;
+}
+#scores-section h3 { color: #58a6ff; margin-bottom: 8px; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th, td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid #21262d;
+}
+th { color: #8b949e; font-size: 0.85em; }
+td { font-size: 0.95em; }
+td:nth-child(2) { text-align: right; color: #58a6ff; }
+.controls-help {
+  color: #8b949e;
+  font-size: 0.85em;
+  margin-top: 6px;
+}
+.saving-msg { color: #f0883e; margin: 8px 0; }
+.save-error { color: #f85149; margin: 8px 0; }
+.save-ok { color: #3fb950; margin: 8px 0; }
+</style>
+</head>
+<body>
+
+<h1>🐍 Vim Snake</h1>
+<p class="subtitle">Use <strong>h j k l</strong> to move &mdash; eat mice, hunt rabbits</p>
+
+<div id="name-screen">
+  <p>Enter your name to begin:</p>
+  <input type="text" id="player-name" maxlength="30" autocomplete="off" placeholder="Your name...">
+  <button id="start-btn">Start Game</button>
+  <div id="scores-section">
+    <h3>High Scores</h3>
+    <table><thead><tr><th>Name</th><th>Score</th></tr></thead><tbody id="scores-body"></tbody></table>
+  </div>
+</div>
+
+<div id="game-wrap">
+  <div id="hud">
+    <div>Score: <span id="score-display">0</span></div>
+    <div>Mice: <span id="mice-display">0</span></div>
+    <div class="multiplier" id="multiplier-display"></div>
+    <div>Player: <span id="player-display"></span></div>
+  </div>
+  <canvas id="game-canvas" width="640" height="480"></canvas>
+  <p class="controls-help">h=left  j=down  k=up  l=right &nbsp;|&nbsp; Arrow keys also work</p>
+</div>
+
+<div id="gameover-screen">
+  <h2>Game Over</h2>
+  <p class="final-score" id="final-score">0</p>
+  <p id="save-status"></p>
+  <button id="restart-btn">Play Again</button>
+  <div id="go-scores-section">
+    <h3>High Scores</h3>
+    <table><thead><tr><th>Name</th><th>Score</th></tr></thead><tbody id="go-scores-body"></tbody></table>
+  </div>
+</div>
+
+<script>
+(function() {
+  const CELL = 20;
+  const COLS = 32;
+  const ROWS = 24;
+  const W = COLS * CELL;
+  const H = ROWS * CELL;
+  const BASE_INTERVAL = 140;
+  const SPEED_BOOST = 12;
+
+  const canvas = document.getElementById("game-canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+
+  const nameInput = document.getElementById("player-name");
+  const startBtn = document.getElementById("start-btn");
+  const nameScreen = document.getElementById("name-screen");
+  const gameWrap = document.getElementById("game-wrap");
+  const gameoverScreen = document.getElementById("gameover-screen");
+  const scoreDisplay = document.getElementById("score-display");
+  const miceDisplay = document.getElementById("mice-display");
+  const multiplierDisplay = document.getElementById("multiplier-display");
+  const playerDisplay = document.getElementById("player-display");
+  const finalScoreEl = document.getElementById("final-score");
+  const saveStatus = document.getElementById("save-status");
+  const restartBtn = document.getElementById("restart-btn");
+
+  let playerName = "";
+  let snake = [];
+  let dir = { x: 1, y: 0 };
+  let nextDir = { x: 1, y: 0 };
+  let mouse = null;
+  let rabbit = null;
+  let score = 0;
+  let miceEaten = 0;
+  let totalMiceEaten = 0;
+  let multiplier = 1;
+  let speed = BASE_INTERVAL;
+  let gameLoop = null;
+  let gameOver = false;
+  let eatAnim = 0;
+  let rabbitAvailable = false;
+  let saving = false;
+
+  function fetchScores(tbodyId) {
+    fetch("scores")
+      .then(r => r.json())
+      .then(scores => {
+        const tbody = document.getElementById(tbodyId);
+        tbody.innerHTML = "";
+        if (scores.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="2" style="color:#484f58">No scores yet</td></tr>';
+          return;
+        }
+        scores.slice(0, 10).forEach(s => {
+          const tr = document.createElement("tr");
+          const name = document.createTextNode(s.name);
+          const sc = document.createTextNode(s.score.toLocaleString());
+          const td1 = document.createElement("td");
+          const td2 = document.createElement("td");
+          td1.appendChild(name);
+          td2.appendChild(sc);
+          tr.appendChild(td1);
+          tr.appendChild(td2);
+          tbody.appendChild(tr);
+        });
+      })
+      .catch(() => {});
+  }
+
+  fetchScores("scores-body");
+
+  function handleNameSubmit(e) {
+    if (e) e.preventDefault();
+    const name = nameInput.value.trim();
+    if (!name) return;
+    playerName = name;
+    nameScreen.style.display = "none";
+    gameWrap.style.display = "block";
+    playerDisplay.textContent = playerName;
+    startGame();
+  }
+
+  startBtn.addEventListener("click", handleNameSubmit);
+  nameInput.addEventListener("keydown", function(e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleNameSubmit();
+    }
+  });
+
+  function startGame() {
+    snake = [];
+    const startX = Math.floor(COLS / 2);
+    const startY = Math.floor(ROWS / 2);
+    for (let i = 3; i >= 0; i--) {
+      snake.push({ x: startX - i, y: startY });
+    }
+    dir = { x: 1, y: 0 };
+    nextDir = { x: 1, y: 0 };
+    score = 0;
+    miceEaten = 0;
+    totalMiceEaten = 0;
+    multiplier = 1;
+    speed = BASE_INTERVAL;
+    gameOver = false;
+    eatAnim = 0;
+    rabbit = null;
+    rabbitAvailable = false;
+    saving = false;
+    updateHUD();
+    placeMouse();
+    gameoverScreen.style.display = "none";
+    gameWrap.style.display = "block";
+    if (gameLoop) clearInterval(gameLoop);
+    gameLoop = setInterval(tick, speed);
+    canvas.focus();
+  }
+
+  function placeMouse() {
+    let pos;
+    do {
+      pos = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
+    } while (snake.some(s => s.x === pos.x && s.y === pos.y) || (rabbit && rabbit.x === pos.x && rabbit.y === pos.y));
+    mouse = pos;
+  }
+
+  function placeRabbit() {
+    let pos;
+    do {
+      pos = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
+    } while (snake.some(s => s.x === pos.x && s.y === pos.y) || (mouse && mouse.x === pos.x && mouse.y === pos.y));
+    rabbit = pos;
+    rabbitAvailable = true;
+  }
+
+  function tick() {
+    if (gameOver) return;
+
+    dir = { ...nextDir };
+    const head = { ...snake[snake.length - 1] };
+    head.x = (head.x + dir.x + COLS) % COLS;
+    head.y = (head.y + dir.y + ROWS) % ROWS;
+
+    if (snake.some(s => s.x === head.x && s.y === head.y)) {
+      endGame();
+      return;
+    }
+
+    snake.push(head);
+
+    let ate = false;
+    if (mouse && head.x === mouse.x && head.y === mouse.y) {
+      score += 100 * multiplier;
+      miceEaten++;
+      totalMiceEaten++;
+      eatAnim = 6;
+      ate = true;
+      placeMouse();
+      if (miceEaten >= 10 && !rabbitAvailable) {
+        placeRabbit();
+      }
+    } else if (rabbit && head.x === rabbit.x && head.y === rabbit.y) {
+      score += 500 * multiplier;
+      multiplier *= 2;
+      speed = Math.max(50, speed - SPEED_BOOST);
+      clearInterval(gameLoop);
+      gameLoop = setInterval(tick, speed);
+      eatAnim = 10;
+      ate = true;
+      rabbit = null;
+      rabbitAvailable = false;
+      miceEaten = 0;
+    } else {
+      snake.shift();
+    }
+
+    if (eatAnim > 0) eatAnim--;
+    updateHUD();
+    draw();
+  }
+
+  function endGame() {
+    gameOver = true;
+    clearInterval(gameLoop);
+    gameLoop = null;
+    draw();
+    gameWrap.style.display = "none";
+    gameoverScreen.style.display = "block";
+    finalScoreEl.textContent = score.toLocaleString();
+    saveScore();
+    fetchScores("go-scores-body");
+  }
+
+  function saveScore() {
+    if (saving) return;
+    saving = true;
+    saveStatus.className = "saving-msg";
+    saveStatus.textContent = "Saving score...";
+
+    fetch("scores", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: playerName, score: score })
+    })
+      .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.error || "Save failed"); });
+        return r.json();
+      })
+      .then(() => {
+        saveStatus.className = "save-ok";
+        saveStatus.textContent = "Score saved!";
+        saving = false;
+        fetchScores("go-scores-body");
+      })
+      .catch(err => {
+        saveStatus.className = "save-error";
+        saveStatus.textContent = "Save failed: " + err.message + " — ";
+        const retryBtn = document.createElement("button");
+        retryBtn.textContent = "Retry";
+        retryBtn.style.fontSize = "0.9em";
+        retryBtn.style.padding = "4px 12px";
+        retryBtn.addEventListener("click", function() {
+          saving = false;
+          saveScore();
+        });
+        saveStatus.appendChild(retryBtn);
+        saving = false;
+      });
+  }
+
+  restartBtn.addEventListener("click", function() {
+    gameoverScreen.style.display = "none";
+    startGame();
+  });
+
+  function updateHUD() {
+    scoreDisplay.textContent = score.toLocaleString();
+    miceDisplay.textContent = totalMiceEaten;
+    multiplierDisplay.textContent = multiplier > 1 ? "x" + multiplier + " multiplier" : "";
+  }
+
+  function draw() {
+    ctx.fillStyle = "#161b22";
+    ctx.fillRect(0, 0, W, H);
+
+    drawGrid();
+
+    if (mouse) drawMouse(mouse.x, mouse.y);
+    if (rabbit) drawRabbit(rabbit.x, rabbit.y);
+
+    for (let i = 0; i < snake.length; i++) {
+      const seg = snake[i];
+      const isHead = i === snake.length - 1;
+      if (isHead) {
+        drawHead(seg.x, seg.y);
+      } else {
+        drawBody(seg.x, seg.y, i);
+      }
+    }
+
+    if (gameOver) {
+      ctx.fillStyle = "rgba(13,17,23,0.7)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#f85149";
+      ctx.font = "bold 36px 'Courier New', monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("GAME OVER", W / 2, H / 2 - 10);
+      ctx.fillStyle = "#58a6ff";
+      ctx.font = "24px 'Courier New', monospace";
+      ctx.fillText("Score: " + score.toLocaleString(), W / 2, H / 2 + 30);
+      ctx.textAlign = "start";
+    }
+  }
+
+  function drawGrid() {
+    ctx.strokeStyle = "#1c2129";
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x <= COLS; x++) {
+      ctx.beginPath();
+      ctx.moveTo(x * CELL, 0);
+      ctx.lineTo(x * CELL, H);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= ROWS; y++) {
+      ctx.beginPath();
+      ctx.moveTo(0, y * CELL);
+      ctx.lineTo(W, y * CELL);
+      ctx.stroke();
+    }
+  }
+
+  function drawBody(gx, gy, idx) {
+    const x = gx * CELL;
+    const y = gy * CELL;
+    const progress = idx / snake.length;
+    const g = Math.floor(140 + progress * 80);
+    ctx.fillStyle = "rgb(50," + g + ",50)";
+    ctx.beginPath();
+    ctx.roundRect(x + 1, y + 1, CELL - 2, CELL - 2, 4);
+    ctx.fill();
+    ctx.fillStyle = "rgba(80,220,80,0.15)";
+    ctx.beginPath();
+    ctx.roundRect(x + 3, y + 2, CELL - 7, (CELL - 4) / 2, 2);
+    ctx.fill();
+  }
+
+  function drawHead(gx, gy) {
+    const x = gx * CELL;
+    const y = gy * CELL;
+    const size = eatAnim > 0 ? CELL + 4 : CELL;
+    const offset = eatAnim > 0 ? -2 : 0;
+
+    ctx.fillStyle = eatAnim > 0 ? "#5af05a" : "#3fb950";
+    ctx.beginPath();
+    ctx.roundRect(x + offset, y + offset, size, size, 6);
+    ctx.fill();
+
+    ctx.fillStyle = "#161b22";
+    const eyeSize = 4;
+    let e1x, e1y, e2x, e2y;
+    if (dir.x === 1) { e1x = x+13; e1y = y+5; e2x = x+13; e2y = y+13; }
+    else if (dir.x === -1) { e1x = x+5; e1y = y+5; e2x = x+5; e2y = y+13; }
+    else if (dir.y === -1) { e1x = x+5; e1y = y+5; e2x = x+13; e2y = y+5; }
+    else { e1x = x+5; e1y = y+13; e2x = x+13; e2y = y+13; }
+    ctx.beginPath();
+    ctx.arc(e1x, e1y, eyeSize, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(e2x, e2y, eyeSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#fff";
+    const px = 1.5;
+    ctx.beginPath();
+    ctx.arc(e1x + dir.x * 1, e1y + dir.y * 1, px, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(e2x + dir.x * 1, e2y + dir.y * 1, px, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (eatAnim > 3) {
+      ctx.fillStyle = "#f85149";
+      let tx = x + CELL / 2 + dir.x * 10;
+      let ty = y + CELL / 2 + dir.y * 10;
+      ctx.beginPath();
+      ctx.ellipse(tx, ty, 3, 1.5, Math.atan2(dir.y, dir.x), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawMouse(gx, gy) {
+    const x = gx * CELL + CELL / 2;
+    const y = gy * CELL + CELL / 2;
+
+    ctx.fillStyle = "#8b8b8b";
+    ctx.beginPath();
+    ctx.ellipse(x, y, 7, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#a0a0a0";
+    ctx.beginPath();
+    ctx.arc(x - 4, y - 4, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + 4, y - 4, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#222";
+    ctx.beginPath();
+    ctx.arc(x + 6, y, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#999";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x - 7, y + 2);
+    ctx.quadraticCurveTo(x - 12, y + 6, x - 10, y + 1);
+    ctx.stroke();
+  }
+
+  function drawRabbit(gx, gy) {
+    const x = gx * CELL + CELL / 2;
+    const y = gy * CELL + CELL / 2;
+    const bob = Math.sin(Date.now() / 200) * 1.5;
+
+    ctx.fillStyle = "#f0883e";
+    ctx.beginPath();
+    ctx.ellipse(x, y + bob, 8, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#f0883e";
+    ctx.beginPath();
+    ctx.ellipse(x - 3, y - 8 + bob, 2.5, 6, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + 3, y - 8 + bob, 2.5, 6, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#ffb570";
+    ctx.beginPath();
+    ctx.ellipse(x - 3, y - 8 + bob, 1.2, 4, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + 3, y - 8 + bob, 1.2, 4, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#222";
+    ctx.beginPath();
+    ctx.arc(x - 3, y - 1 + bob, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + 3, y - 1 + bob, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 8px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("x2", x, y + 16);
+    ctx.textAlign = "start";
+  }
+
+  document.addEventListener("keydown", function(e) {
+    if (gameOver) return;
+    if (document.activeElement === nameInput) return;
+
+    let newDir = null;
+    switch (e.key) {
+      case "h": case "ArrowLeft":  newDir = { x: -1, y: 0 }; break;
+      case "l": case "ArrowRight": newDir = { x: 1, y: 0 };  break;
+      case "k": case "ArrowUp":    newDir = { x: 0, y: -1 }; break;
+      case "j": case "ArrowDown":  newDir = { x: 0, y: 1 };  break;
+    }
+    if (newDir) {
+      if (newDir.x !== -dir.x || newDir.y !== -dir.y) {
+        nextDir = newDir;
+      }
+      e.preventDefault();
+    }
+  });
+
+  draw();
+})();
+</script>
+</body>
+</html>
