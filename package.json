@@ -1,0 +1,14 @@
+{
+  "name": "vim-snake",
+  "version": "1.0.0",
+  "description": "Snake game with vim (hjkl) controls and persistent high scores",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "setup": "npm install --production"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "cors": "^2.8.5"
+  }
+}
